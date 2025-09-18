@@ -284,6 +284,9 @@ impl<'a> IrConverter<'a> {
             If(if_) => self.if_(if_),
             Choose(choose) => self.choose(choose),
             ForEach(for_each) => self.for_each(for_each),
+            Iterate(iterate) => self.iterate(iterate),
+            NextIteration(next_iteration) => self.next_iteration(next_iteration),
+            Break(break_) => self.break_(break_),
             Copy(copy) => self.copy(copy),
             CopyOf(copy_of) => self.copy_of(copy_of),
             Sequence(sequence) => self.sequence(sequence),
@@ -636,6 +639,91 @@ impl<'a> IrConverter<'a> {
         });
 
         Ok(bindings.bind_expr_no_span(&mut self.variables, expr))
+    }
+
+    fn iterate(&mut self, iterate: &ast::Iterate) -> error::SpannedResult<Bindings> {
+        let (var_atom, bindings) = self.expression(&iterate.select)?.atom_bindings();
+
+        let params = iterate
+            .params
+            .iter()
+            .map(|param| -> error::SpannedResult<ir::IterateParam> {
+                let param_bindings = self.select_or_sequence_constructor(param)?;
+                let name = self.variables.new_var_name(&param.name);
+                Ok(ir::IterateParam {
+                    name,
+                    value: Box::new(param_bindings.expr()),
+                    type_: param.as_.clone(),
+                })
+            })
+            .collect::<error::SpannedResult<Vec<_>>>()?;
+
+        let (context_names, loop_name) = self.variables.push_iterate_context();
+        let return_bindings = self.sequence_constructor(&iterate.sequence_constructor)?;
+        let on_complete_bindings = iterate
+            .on_completion
+            .as_ref()
+            .map(|oc| self.select_or_sequence_constructor(oc))
+            .transpose()?;
+        self.variables.pop_context();
+
+        let expr = ir::Expr::Iterate(ir::Iterate {
+            context_names,
+            loop_name,
+            var_atom,
+            params,
+            expr: Box::new(return_bindings.expr()),
+            on_complete: on_complete_bindings.map(|x| Box::new(x.expr())),
+        });
+
+        Ok(bindings.bind_expr_no_span(&mut self.variables, expr))
+    }
+
+    fn break_(&mut self, break_: &ast::Break) -> error::SpannedResult<Bindings> {
+        let loop_name = self
+            .variables
+            .current_iterate_loop_name()
+            .ok_or(error::SpannedError {
+                error: error::Error::XTSE3120,
+                span: None,
+            })?;
+
+        let bindings = self.select_or_sequence_constructor(break_)?;
+        let expr = ir::Expr::IterateBreak(ir::IterateBreak {
+            loop_name,
+            return_expr: Box::new(bindings.expr()),
+        });
+        Ok(bindings.bind_expr_no_span(&mut self.variables, expr))
+    }
+
+    fn next_iteration(
+        &mut self,
+        next_iteration: &ast::NextIteration,
+    ) -> error::SpannedResult<Bindings> {
+        let params = next_iteration
+            .with_params
+            .iter()
+            .map(|param| {
+                let value_bind = self.select_or_sequence_constructor(param)?;
+                Ok(ir::IterateParam {
+                    name: self.variables.new_var_name(&param.name),
+                    value: Box::new(value_bind.expr()),
+                    type_: param.as_.clone(),
+                })
+            })
+            .collect::<error::SpannedResult<Vec<_>>>()?;
+
+        let empty_sequence = self.empty_sequence();
+        let return_expr = Bindings::new(
+            self.variables
+                .new_binding(empty_sequence.value, empty_sequence.span),
+        );
+        let let_next = ir::Expr::IterateLetNext(ir::IterateLetNext {
+            params,
+            return_expr: Box::new(return_expr.expr()),
+        });
+        let result = return_expr.bind_expr_no_span(&mut self.variables, let_next);
+        Ok(result)
     }
 
     fn copy(&mut self, copy: &ast::Copy) -> error::SpannedResult<Bindings> {
