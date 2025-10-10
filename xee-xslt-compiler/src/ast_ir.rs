@@ -1,7 +1,7 @@
 use ahash::HashSetExt;
 use xee_name::{Name, Namespaces, FN_NAMESPACE};
 
-use xee_interpreter::{context::StaticContext, error, interpreter};
+use xee_interpreter::{context::StaticContext, error, interpreter, sequence::QNameOrString};
 use xee_ir::{compile_xslt, ir, Bindings, Variables};
 use xee_xpath_ast::{ast as xpath_ast, pattern::transform_pattern, span::Spanned};
 use xee_xslt_ast::{ast, parse_transform};
@@ -32,7 +32,7 @@ pub fn parse(
     let mut transform = match transform {
         Ok(transform) => transform,
         Err(_e) => {
-            return Err(error::Error::Unsupported.into());
+            return Err(error::Error::Unsupported(format!("Failed parsing XSLT: {:?}", _e)).into());
         }
     };
     // insert default rules early on in precedence order
@@ -126,7 +126,12 @@ impl<'a> IrConverter<'a> {
         match declaration {
             Template(template) => self.template(declarations, template),
             Mode(mode) => self.mode(declarations, mode),
-            _ => Err(error::Error::Unsupported.into()),
+            Output(output) => self.output(declarations, output),
+            _ => Err(error::Error::Unsupported(format!(
+                "Declaration not supported: {:?}",
+                declaration
+            ))
+            .into()),
         }
     }
 
@@ -142,7 +147,10 @@ impl<'a> IrConverter<'a> {
                 let default_priorities = default_priority(&pattern.pattern).collect::<Vec<_>>();
                 if default_priorities.len() > 1 {
                     // for now, we can't deal with multiple registration yet
-                    return Err(error::Error::Unsupported.into());
+                    return Err(error::Error::Unsupported(
+                        "Default priorities splitting not supported".to_string(),
+                    )
+                    .into());
                 } else {
                     default_priorities.first().unwrap().1
                 }
@@ -164,7 +172,7 @@ impl<'a> IrConverter<'a> {
             });
             Ok(())
         } else {
-            Err(error::Error::Unsupported.into())
+            Err(error::Error::Unsupported("Named templates not supported".to_string()).into())
         }
     }
 
@@ -174,6 +182,119 @@ impl<'a> IrConverter<'a> {
         mode: &ast::Mode,
     ) -> error::SpannedResult<()> {
         declarations.modes.insert(mode.name.clone(), ir::Mode {});
+        Ok(())
+    }
+
+    fn output(
+        &mut self,
+        declarations: &mut ir::Declarations,
+        output: &ast::Output,
+    ) -> error::SpannedResult<()> {
+        let serialization = &mut declarations.serialization_params;
+        if output.name.is_some() {
+            return Err(error::Error::Unsupported(String::from(
+                "Output: Named outputs are not supported yet",
+            ))
+            .into());
+        }
+        if output.parameter_document.is_some() {
+            return Err(error::Error::Unsupported(String::from(
+                "Output: Parameter documents are not supported yet",
+            ))
+            .into());
+        }
+        if !output.use_character_maps.is_empty() {
+            return Err(error::Error::Unsupported(String::from(
+                "Output: Character maps are not supported yet",
+            ))
+            .into());
+        }
+        if output.build_tree {
+            return Err(error::Error::Unsupported(String::from(
+                "Output: Build tree is not supported yet",
+            ))
+            .into());
+        }
+        fn assign_if_some<T>(location: &mut T, value: Option<T>) {
+            if let Some(v) = value {
+                *location = v;
+            }
+        }
+        serialization.allow_duplicate_names = output.allow_duplicate_names;
+        serialization.byte_order_mark = output.byte_order_mark;
+        serialization
+            .cdata_section_elements
+            .extend(output.cdata_section_elements.clone());
+        serialization.doctype_public = output.doctype_public.clone();
+        serialization.doctype_system = output.doctype_system.clone();
+        match &output.method {
+            Some(ast::OutputMethod::Xml) => {
+                serialization.method = QNameOrString::String("xml".to_string())
+            }
+            Some(ast::OutputMethod::Html) => {
+                serialization.method = QNameOrString::String("html".to_string())
+            }
+            Some(ast::OutputMethod::Json) => {
+                serialization.method = QNameOrString::String("json".to_string())
+            }
+            None => {}
+            method => {
+                return Err(error::Error::Unsupported(format!(
+                    "Output method {:?} not supported yet",
+                    method
+                ))
+                .into());
+            }
+        };
+        assign_if_some(&mut serialization.encoding, output.encoding.clone());
+        serialization.escape_uri_attributes = output.escape_uri_attributes;
+        assign_if_some(&mut serialization.html_version, output.html_version);
+        serialization.include_content_type = output.include_content_type;
+        serialization.indent = output.indent;
+        assign_if_some(
+            &mut serialization.item_separator,
+            output.item_separator.clone(),
+        );
+        match &output.json_node_output_method {
+            Some(ast::JsonNodeOutputMethod::Xml) => {
+                serialization.json_node_output_method = QNameOrString::String("xml".to_string())
+            }
+            Some(ast::JsonNodeOutputMethod::Html) => {
+                serialization.json_node_output_method = QNameOrString::String("html".to_string())
+            }
+            None => {}
+            method => {
+                return Err(error::Error::Unsupported(format!(
+                    "JSON node output method {:?} not supported yet",
+                    method
+                ))
+                .into());
+            }
+        }
+        serialization.media_type = output.media_type.clone();
+        serialization.normalization_form =
+            output.normalization_form.as_ref().and_then(|nf| match nf {
+                ast::NormalizationForm::Nfc => Some(String::from("NFC")),
+                ast::NormalizationForm::Nfd => Some(String::from("NFD")),
+                ast::NormalizationForm::Nfkc => Some(String::from("NFKC")),
+                ast::NormalizationForm::Nfkd => Some(String::from("NFKD")),
+                ast::NormalizationForm::FullyNormalized => Some(String::from("fully-normalized")),
+                ast::NormalizationForm::NmToken(nm) => Some(nm.clone()),
+                ast::NormalizationForm::None => None,
+            });
+        serialization.omit_xml_declaration = output.omit_xml_declaration;
+        assign_if_some(
+            &mut serialization.standalone,
+            output.standalone.as_ref().map(|s| match s {
+                ast::Standalone::Bool(b) => Some(*b),
+                ast::Standalone::Omit => None,
+            }),
+        );
+        serialization
+            .suppress_indentation
+            .extend(output.suppress_indentation.clone());
+        serialization.undeclare_prefixes = output.undeclare_prefixes;
+        assign_if_some(&mut serialization.version, output.version.clone());
         Ok(())
     }
 
@@ -299,8 +420,15 @@ impl<'a> IrConverter<'a> {
             // TODO: xsl:variable does not produce content and is handled
             // earlier already should be unreachable!() but at this point this
             // can be reached so return unsupported
-            Variable(_variable) => Err(error::Error::Unsupported.into()),
-            _ => Err(error::Error::Unsupported.into()),
+            Variable(_variable) => Err(error::Error::Unsupported(String::from(
+                "Internal bug: variable node should have been processed already",
+            ))
+            .into()),
+            _ => Err(error::Error::Unsupported(format!(
+                "Instruction not supported: {:?}",
+                instruction
+            ))
+            .into()),
         }
     }
 
