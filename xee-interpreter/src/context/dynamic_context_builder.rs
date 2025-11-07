@@ -28,6 +28,8 @@ pub struct DynamicContextBuilder<'a> {
     environment_variables: HashMap<String, String>,
 }
 
+/// A shallow wrapper around a collection of XML documents
+/// [`xml::Documents`]
 #[derive(Debug, Clone)]
 pub struct DocumentsRef(Rc<RefCell<xml::Documents>>);
 
