@@ -39,6 +39,10 @@ impl From<xot::ParseError> for DocumentsError {
     }
 }
 
+/// An XML document with an optional URI and a root [`xot::Node`].
+/// 
+/// The document's elements are stored in a [`Xot`] arena and can be accessed
+/// through the root node.
 #[derive(Debug, Clone)]
 pub struct Document {
     pub(crate) uri: Option<IriString>,
@@ -46,7 +50,7 @@ pub struct Document {
 }
 
 impl Document {
-    /// The document root node
+    /// The document root node, a lightweight handle into a [`Xot`] arena.
     pub fn root(&self) -> xot::Node {
         self.root
     }
@@ -81,7 +85,9 @@ pub struct Documents {
 /// freely copy it.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
 pub struct DocumentHandle {
+    // Documents collection identifier
     pub(crate) documents_id: usize,
+    // Document identifier within the collection
     pub(crate) id: usize,
 }
 
@@ -166,7 +172,7 @@ impl Documents {
         self.documents.get(handle.id)
     }
 
-    /// Obtain document node by handle
+    /// Obtain document root node by handle
     pub fn get_node_by_handle(&self, handle: DocumentHandle) -> Option<xot::Node> {
         Some(self.get_by_handle(handle)?.root)
     }
