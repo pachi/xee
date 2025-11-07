@@ -40,7 +40,7 @@ impl From<xot::ParseError> for DocumentsError {
 }
 
 /// An XML document with an optional URI and a root [`xot::Node`].
-/// 
+///
 /// The document's elements are stored in a [`Xot`] arena and can be accessed
 /// through the root node.
 #[derive(Debug, Clone)]

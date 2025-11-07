@@ -13,10 +13,10 @@ use xot::Xot;
 /// Alternatively this collection can be added to incrementally during
 /// processing using the `fn:doc` function for instance. Once a document under
 /// a URL is present, it won't be changed.
-/// 
+///
 /// The nodes from the added documents are kept in a [`Xot`] arena and can be
 /// accessed through the `fn:xot` and `fn:xot_mut` methods.
-/// 
+///
 /// The `fn:documents` method returns a reference to the
 /// [`xee_interpreter::xml::Documents`] collection, which can be
 /// used to look up the added [`xee_interpreter::xml::Document`] items
@@ -26,7 +26,7 @@ pub struct Documents {
     // The Xot arena holding all nodes of the documents in the collection.
     pub(crate) xot: Xot,
     // A reference to the underlaying collection of XML documents
-    // so they can be looked up by URI or handle. Each Document stores the 
+    // so they can be looked up by URI or handle. Each Document stores the
     // URI and root node of the XML data.
     pub(crate) documents: DocumentsRef,
 }
